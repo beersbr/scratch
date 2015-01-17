@@ -91,7 +91,7 @@ Win32ResizeDIBSection(int Width, int Height)
 
 
 internal_function void
-Win32UpdateWindow(HDC DeviceContext, RECT *WindowRect, int X, int Y, int Width, int Height)
+Win32UpdateWindow(HDC DeviceContext, RECT WindowRect, int X, int Y, int Width, int Height)
 {
 	/// REFERENCE BitBlt
 	/// http://msdn.microsoft.com/en-us/library/windows/desktop/dd183370(v=vs.85).aspx
@@ -99,9 +99,8 @@ Win32UpdateWindow(HDC DeviceContext, RECT *WindowRect, int X, int Y, int Width, 
 	/// REFERENCE StretchDIBits
 	/// http://msdn.microsoft.com/en-us/library/windows/desktop/dd145121(v=vs.85).aspx
 
-	int WindowWidth = WindowRect->right - WindowRect->left;
-	int WindowHeight = WindowRect->bottom - WindowRect->top;
-
+	int WindowWidth = WindowRect.right - WindowRect.left;
+	int WindowHeight = WindowRect.bottom - WindowRect.top;
 
 	StretchDIBits(
 		DeviceContext,
@@ -206,7 +205,7 @@ MainProcCallback(HWND Window,
 			RECT client_rect;
 			GetClientRect(Window, &client_rect);
 
-			Win32UpdateWindow(device_context, &client_rect, x, y, width, height);
+			Win32UpdateWindow(device_context, client_rect, x, y, width, height);
 
 			/// REFERENCE EndPaint
 			/// http://msdn.microsoft.com/en-us/library/windows/desktop/dd162598(v=vs.85).aspx
@@ -239,7 +238,7 @@ WinMain(HINSTANCE Instance,
 	WNDCLASS window_class = {}; /// {} initializes struct to 0
 
 	// i'll handle the device context and redraw when window is moved
-	window_class.style = CS_OWNDC|CS_HREDRAW|CS_VREDRAW;
+	window_class.style = CS_HREDRAW|CS_VREDRAW;
 	window_class.lpfnWndProc = MainProcCallback;
 	window_class.hInstance = Instance; // GetModuleHandle(0) will give the current handle the instance that is running
 	// window_class.hIcon =;
@@ -280,7 +279,6 @@ WinMain(HINSTANCE Instance,
 				MSG message;
 				while(PeekMessage(&message, 0, 0, 0, PM_REMOVE))
 				{
-
 					if(message.message == WM_QUIT)
 					{
 						Running = false;
@@ -297,7 +295,6 @@ WinMain(HINSTANCE Instance,
 					DispatchMessage(&message);
 				}
 
-
 				Win32RenderGradient(XOffset, YOffset);
 				HDC device_context = GetDC(window_handle);
 
@@ -307,7 +304,7 @@ WinMain(HINSTANCE Instance,
 				int window_width = client_rect.right - client_rect.left;
 				int window_height = client_rect.bottom - client_rect.top;
 
-				Win32UpdateWindow(device_context, &client_rect, 0, 0, window_width, window_height);
+				Win32UpdateWindow(device_context, client_rect, 0, 0, window_width, window_height);
 
 				ReleaseDC(window_handle, device_context);
 
