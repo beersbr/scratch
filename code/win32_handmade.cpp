@@ -1,17 +1,61 @@
 
 #include <windows.h>
+#include <stdint.h>
 
 #define internal_function static
 #define local_persist static
 #define global_variable static  // global statics are automatically initialized to 0
 
+typedef int8_t  int8;
+typedef int16_t int16;
+typedef int32_t int32;
+typedef int64_t int64;
+
+typedef uint8_t uint8;
+typedef uint16_t uint16;
+typedef uint32_t uint32;
+typedef uint64_t uint64;
+
 global_variable bool Running;
 
 global_variable BITMAPINFO BitmapInfo;
 global_variable void *BitmapMemory;
-global_variable HBITMAP BitmapHandle;
-global_variable HDC BitmapDeviceContext;
+global_variable int BitmapWidth;
+global_variable int BitmapHeight;
+global_variable int BytesPerPixel = 4;
 
+internal_function void
+Win32RenderGradient(int BlueOffset, int GreenOffset)
+{
+	int pitch = BitmapWidth*BytesPerPixel;
+	uint8 *row = (uint8*)BitmapMemory;
+	for(int Y = 0; Y < BitmapHeight; ++Y)
+	{
+		uint32 *pixel = (uint32*)row;
+
+		for(int X = 0; X < BitmapWidth; ++X)
+		{
+
+			uint8 blue = (X + BlueOffset);
+			uint8 green = (Y + GreenOffset);
+
+			*pixel++ = ((green << 8) | blue);
+
+			// Pixel in mem: B G R XX 
+			// *Pixel = (uint8)(X+XOffset);
+			// ++Pixel;
+			// *Pixel = (uint8)(Y+YOffset);
+			// ++Pixel;
+			// *Pixel = 0;
+			// ++Pixel;
+			// *Pixel = 0;
+			// ++Pixel;
+		}
+
+		row += pitch;
+	}
+
+}
 
 internal_function void
 Win32ResizeDIBSection(int Width, int Height)
@@ -19,40 +63,35 @@ Win32ResizeDIBSection(int Width, int Height)
 
 	/// free the global handle before creating a new bitmap
 
-	if(BitmapHandle)
+	if(BitmapMemory)
 	{
-		DeleteObject(BitmapHandle);
+		VirtualFree(BitmapMemory, 0, MEM_RELEASE);
 	}
-	
-	if(BitmapDeviceContext != 0)
-	{
-		/// ask windows for a device context that is compatible with something in this case the screen
-		BitmapDeviceContext = CreateCompatibleDC(0);
-	}
+
+
+	BitmapWidth = Width;
+	BitmapHeight = Height;
 
 	BitmapInfo.bmiHeader.biSize = sizeof(BitmapInfo.bmiHeader);
-	BitmapInfo.bmiHeader.biWidth = Width;
-	BitmapInfo.bmiHeader.biHeight = Height;
-	// BitmapInfo.bmiHeader.biPlanes = 0;
+	BitmapInfo.bmiHeader.biWidth = BitmapWidth;
+	BitmapInfo.bmiHeader.biHeight = -BitmapHeight;
+	BitmapInfo.bmiHeader.biPlanes = 1;
 	BitmapInfo.bmiHeader.biBitCount = 32;
 	BitmapInfo.bmiHeader.biCompression = BI_RGB;
-	// BitmapInfo.bmiHeader.biSizeImage = 0;
-	// BitmapInfo.bmiHeader.biXPelsPerMeter = 0;
-	// BitmapInfo.bmiHeader.biYPelsPerMeter = 0;
-	// BitmapInfo.bmiHeader.biClrUsed = 0;
-	// BitmapInfo.bmiHeader.biClrImportant = 0;
 
-	HBITMAP bitmap_handle = CreateDIBSection(
-		BitmapDeviceContext,
-		&BitmapInfo,
-		DIB_RGB_COLORS,
-		&BitmapMemory,
-		0, 0);
+	// no more create dc as we dont need it. strechdibits takes a pointer to mem
+
+	/// REFERENCE VirtualAlloc
+	/// http://msdn.microsoft.com/en-us/library/windows/desktop/aa366887%28v=vs.85%29.aspx
+
+
+	int bitmap_memory_size = (Width * Height)*BytesPerPixel;
+	BitmapMemory = VirtualAlloc(0, bitmap_memory_size, MEM_COMMIT, PAGE_READWRITE);
 }
 
 
 internal_function void
-Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
+Win32UpdateWindow(HDC DeviceContext, RECT *WindowRect, int X, int Y, int Width, int Height)
 {
 	/// REFERENCE BitBlt
 	/// http://msdn.microsoft.com/en-us/library/windows/desktop/dd183370(v=vs.85).aspx
@@ -60,10 +99,16 @@ Win32UpdateWindow(HDC DeviceContext, int X, int Y, int Width, int Height)
 	/// REFERENCE StretchDIBits
 	/// http://msdn.microsoft.com/en-us/library/windows/desktop/dd145121(v=vs.85).aspx
 
+	int WindowWidth = WindowRect->right - WindowRect->left;
+	int WindowHeight = WindowRect->bottom - WindowRect->top;
+
+
 	StretchDIBits(
 		DeviceContext,
-		X, Y, Width, Height,
-		X, Y, Width, Height,
+		// X, Y, Width, Height,
+		// X, Y, Width, Height,
+		0, 0, BitmapWidth, BitmapHeight,
+		0, 0, WindowWidth, WindowHeight,
 		BitmapMemory,
 		&BitmapInfo,
 		DIB_RGB_COLORS, SRCCOPY);
@@ -104,6 +149,11 @@ MainProcCallback(HWND Window,
 			OutputDebugString("WM_DESTROY\n");
 			Running = false;
 		} break;
+
+		// case WM_SETCURSOR:
+		// {
+		// 	SetCursor(0);
+		// } break;
 
 		case WM_CLOSE: // when user presses the x in the top right hand corner
 		{
@@ -153,7 +203,10 @@ MainProcCallback(HWND Window,
 			int width = paint.rcPaint.right - paint.rcPaint.left;
 			int height = paint.rcPaint.bottom - paint.rcPaint.top;
 
-			Win32UpdateWindow(device_context, x, y, width, height);
+			RECT client_rect;
+			GetClientRect(Window, &client_rect);
+
+			Win32UpdateWindow(device_context, &client_rect, x, y, width, height);
 
 			/// REFERENCE EndPaint
 			/// http://msdn.microsoft.com/en-us/library/windows/desktop/dd162598(v=vs.85).aspx
@@ -215,16 +268,24 @@ WinMain(HINSTANCE Instance,
 			/// REFERENCE GetMessage
 			/// http://msdn.microsoft.com/en-us/library/windows/desktop/ms644936(v=vs.85).aspx
 
-			MSG message;
+			/// REFERENCE PeekMessage
+			/// http://msdn.microsoft.com/en-us/library/windows/desktop/ms644943%28v=vs.85%29.aspx
+
+			int XOffset = 0;
+			int YOffset = 0;
 			Running = true;
 			while(Running)
 			{
-				BOOL message_result = GetMessage(&message,
-					   0,
-					   0,
-					   0);
-				if(message_result > 0)
+				
+				MSG message;
+				while(PeekMessage(&message, 0, 0, 0, PM_REMOVE))
 				{
+
+					if(message.message == WM_QUIT)
+					{
+						Running = false;
+					}
+
 					/// REFERENCE TranslateMessage
 					/// http://msdn.microsoft.com/en-us/library/windows/desktop/ms644955(v=vs.85).aspx
 
@@ -235,10 +296,22 @@ WinMain(HINSTANCE Instance,
 
 					DispatchMessage(&message);
 				}
-				else
-				{
-					break;
-				}
+
+
+				Win32RenderGradient(XOffset, YOffset);
+				HDC device_context = GetDC(window_handle);
+
+				RECT client_rect;
+				GetClientRect(window_handle, &client_rect);
+
+				int window_width = client_rect.right - client_rect.left;
+				int window_height = client_rect.bottom - client_rect.top;
+
+				Win32UpdateWindow(device_context, &client_rect, 0, 0, window_width, window_height);
+
+				ReleaseDC(window_handle, device_context);
+
+				XOffset++;
 			}
 				
 		}
